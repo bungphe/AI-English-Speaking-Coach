@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { SavedConversation } from '../types';
 import TranscriptDisplay from './TranscriptDisplay';
@@ -17,7 +16,7 @@ const HistoryPanel: React.FC<HistoryPanelProps> = ({ isOpen, onClose, conversati
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-75 flex justify-center items-center z-50 p-4 transition-opacity duration-300">
-      <div className="bg-gray-800 rounded-2xl shadow-2xl w-full max-w-4xl h-full max-h-[80vh] flex flex-col md:flex-row overflow-hidden">
+      <div className="bg-gray-800 rounded-2xl shadow-2xl w-full max-w-5xl h-full max-h-[80vh] flex flex-col md:flex-row overflow-hidden">
         <div className="w-full md:w-1/3 border-r border-gray-700 flex flex-col">
           <div className="p-4 border-b border-gray-700 flex justify-between items-center">
              <h2 className="text-xl font-bold">History</h2>
@@ -56,12 +55,22 @@ const HistoryPanel: React.FC<HistoryPanelProps> = ({ isOpen, onClose, conversati
                       <i className="fas fa-trash"></i> Delete
                   </button>
               </div>
-              <div className="flex-grow overflow-hidden">
-                 <TranscriptDisplay 
-                    containerClassName="h-full p-6 overflow-y-auto custom-scrollbar"
-                    transcript={selectedConversation.transcript} 
-                    aiAvatarUrl={selectedConversation.coach.avatarUrl} 
-                 />
+              <div className="flex-grow overflow-y-auto custom-scrollbar flex flex-col">
+                <div className="p-6">
+                    <h4 className="text-lg font-semibold mb-2 text-green-400">Feedback Summary</h4>
+                    <div
+                        className="prose prose-invert prose-sm bg-gray-900/50 rounded-lg p-4"
+                        dangerouslySetInnerHTML={{ __html: selectedConversation.feedback.replace(/\n/g, '<br />') }}
+                    />
+                </div>
+                <div className="p-6 border-t border-gray-700">
+                    <h4 className="text-lg font-semibold mb-2 text-blue-400">Full Transcript</h4>
+                    <TranscriptDisplay 
+                        transcript={selectedConversation.transcript} 
+                        aiAvatarUrl={selectedConversation.coach.avatarUrl} 
+                        containerClassName="h-auto"
+                    />
+                </div>
               </div>
             </>
           ) : (

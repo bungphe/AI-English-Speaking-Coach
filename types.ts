@@ -1,4 +1,3 @@
-
 export interface TranscriptEntry {
   speaker: 'You' | 'AI';
   text: string;
@@ -13,4 +12,5 @@ export interface SavedConversation {
     name: string;
     avatarUrl: string;
   };
+  feedback: string;
 }

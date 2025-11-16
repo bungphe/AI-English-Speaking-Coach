@@ -33,6 +33,7 @@ const App: React.FC = () => {
   const [savedConversations, setSavedConversations] = useState<SavedConversation[]>([]);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [selectedConversation, setSelectedConversation] = useState<SavedConversation | null>(null);
+  const [isGeneratingFeedback, setIsGeneratingFeedback] = useState(false);
 
   const sessionPromiseRef = useRef<Promise<any> | null>(null);
   const inputAudioContextRef = useRef<AudioContext | null>(null);
@@ -189,9 +190,6 @@ const App: React.FC = () => {
     }
   }, [ai.live, stopSession, currentAvatar.name]);
   
-  // FIX: The `isFinal` property does not exist on the `Transcription` type from the Gemini API.
-  // The logic has been updated to manage the finality of transcript entries
-  // based on the `turnComplete` event, which is the correct approach.
   const handleTranscription = (message: LiveServerMessage) => {
     setTranscript(prev => {
         let newTranscript = [...prev];
@@ -239,26 +237,54 @@ const App: React.FC = () => {
     }
   }, [isSessionActive, startSession, stopSession]);
 
+  const generateFeedback = async (finalTranscript: TranscriptEntry[]) => {
+    const prompt = `Based on the following conversation transcript between an AI English Coach and a user, please provide a concise "Feedback Summary" for the user. Focus on 1-2 key grammar points and 1-2 pronunciation suggestions they can work on. Frame the feedback to be encouraging and constructive. Format the output in Markdown.\n\nTranscript:\n${finalTranscript.map(t => `${t.speaker}: ${t.text}`).join('\n')}`;
+
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: prompt,
+        });
+        return response.text;
+    } catch (error) {
+        console.error("Error generating feedback:", error);
+        return "Could not generate feedback for this session.";
+    }
+  };
+  
   useEffect(() => {
     if (isSessionActive) {
       sessionEndedRef.current = true;
     } else if (sessionEndedRef.current) {
       sessionEndedRef.current = false;
       if (transcript.length > 2) {
-        const newConversation: SavedConversation = {
-          id: Date.now().toString(),
-          timestamp: new Date().toISOString(),
-          transcript: transcript.map(t => ({ ...t, isFinal: true })),
-          coach: {
-            name: currentAvatar.name,
-            avatarUrl: currentAvatar.neutral,
-          },
+        const processAndSaveFolder = async () => {
+            setIsGeneratingFeedback(true);
+            setStatusText('Analyzing session and generating feedback...');
+            
+            const finalTranscript = transcript.map(t => ({ ...t, isFinal: true }));
+            const feedbackText = await generateFeedback(finalTranscript);
+
+            const newConversation: SavedConversation = {
+                id: Date.now().toString(),
+                timestamp: new Date().toISOString(),
+                transcript: finalTranscript,
+                coach: {
+                    name: currentAvatar.name,
+                    avatarUrl: currentAvatar.neutral,
+                },
+                feedback: feedbackText,
+            };
+            saveConversation(newConversation);
+            setSavedConversations(prev => [newConversation, ...prev]);
+            
+            setIsGeneratingFeedback(false);
+            setStatusText('Session saved with feedback! Click start to begin again.');
         };
-        saveConversation(newConversation);
-        setSavedConversations(prev => [newConversation, ...prev]);
+        processAndSaveFolder();
       }
     }
-  }, [isSessionActive, transcript, currentAvatar]);
+  }, [isSessionActive, transcript, currentAvatar, ai.models]);
   
   useEffect(() => {
     let animationFrameId: number | null = null;
@@ -343,7 +369,7 @@ const App: React.FC = () => {
                 <button
                     key={avatar.name}
                     onClick={() => setCurrentAvatar(avatar)}
-                    disabled={isSessionActive}
+                    disabled={isSessionActive || isGeneratingFeedback}
                     className={`w-10 h-10 sm:w-12 sm:h-12 rounded-full overflow-hidden border-2 transition-all ${currentAvatar.name === avatar.name ? 'border-green-500 scale-110' : 'border-transparent hover:border-gray-500'} disabled:opacity-50 disabled:cursor-not-allowed`}
                     title={`Select ${avatar.name}`}
                 >
@@ -372,7 +398,8 @@ const App: React.FC = () => {
 
       <footer className="flex-shrink-0 mt-4">
         <Controls 
-            isSessionActive={isSessionActive} 
+            isSessionActive={isSessionActive}
+            isGeneratingFeedback={isGeneratingFeedback}
             onToggleSession={handleToggleSession} 
             statusText={statusText}
             onShowHistory={handleShowHistory}
