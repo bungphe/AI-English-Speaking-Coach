@@ -1,32 +1,55 @@
-
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { GoogleGenAI, LiveServerMessage, Modality } from "@google/genai";
 import { decode, decodeAudioData, createPcmBlob } from './services/audioUtils';
+import { getHistory, saveConversation, deleteConversation } from './services/historyService';
 import VideoPanel from './components/VideoPanel';
 import Controls from './components/Controls';
 import TranscriptDisplay from './components/TranscriptDisplay';
-import { TranscriptEntry } from './types';
+import HistoryPanel from './components/HistoryPanel';
+import { TranscriptEntry, SavedConversation } from './types';
 
-// IMPORTANT: Do not expose this in client-side code in a real application.
-// This is for demonstration purposes only.
 const API_KEY = process.env.API_KEY;
+
+const AVATARS = [
+    {
+      name: 'Eva',
+      neutral: 'https://storage.googleapis.com/aai-web-samples/speak-to-me/images/eva_neutral.png',
+      talking: 'https://storage.googleapis.com/aai-web-samples/speak-to-me/images/eva_talking.png',
+    },
+    {
+      name: 'Bot',
+      neutral: 'https://storage.googleapis.com/aai-web-samples/speak-to-me/images/bot_neutral.png',
+      talking: 'https://storage.googleapis.com/aai-web-samples/speak-to-me/images/bot_talking.png',
+    }
+  ];
 
 const App: React.FC = () => {
   const [isSessionActive, setIsSessionActive] = useState(false);
   const [statusText, setStatusText] = useState('Click start to begin');
   const [userStream, setUserStream] = useState<MediaStream | null>(null);
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
+  const [currentAvatar, setCurrentAvatar] = useState(AVATARS[0]);
+  const [isAiSpeaking, setIsAiSpeaking] = useState(false);
+  const [savedConversations, setSavedConversations] = useState<SavedConversation[]>([]);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [selectedConversation, setSelectedConversation] = useState<SavedConversation | null>(null);
 
   const sessionPromiseRef = useRef<Promise<any> | null>(null);
   const inputAudioContextRef = useRef<AudioContext | null>(null);
   const outputAudioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const scriptProcessorRef = useRef<ScriptProcessorNode | null>(null);
   const nextStartTimeRef = useRef(0);
   const audioSources = useRef<Set<AudioBufferSourceNode>>(new Set());
+  const sessionEndedRef = useRef(false);
 
   const ai = new GoogleGenAI({ apiKey: API_KEY });
 
+  useEffect(() => {
+    setSavedConversations(getHistory());
+  }, []);
+  
   const stopSession = useCallback(() => {
     setStatusText('Session ended. Click start to begin again.');
     if (sessionPromiseRef.current) {
@@ -51,6 +74,10 @@ const App: React.FC = () => {
 
     if (inputAudioContextRef.current && inputAudioContextRef.current.state !== 'closed') {
       inputAudioContextRef.current.close();
+    }
+    if (analyserRef.current) {
+        analyserRef.current.disconnect();
+        analyserRef.current = null;
     }
     if (outputAudioContextRef.current && outputAudioContextRef.current.state !== 'closed') {
       outputAudioContextRef.current.close();
@@ -77,7 +104,15 @@ const App: React.FC = () => {
         setStatusText('Connecting to AI...');
 
         inputAudioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
-        outputAudioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+        const outputAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+        outputAudioContextRef.current = outputAudioContext;
+
+        const analyser = outputAudioContext.createAnalyser();
+        analyser.fftSize = 256;
+        analyserRef.current = analyser;
+        analyser.connect(outputAudioContext.destination);
+        
+        const systemInstruction = `You are ${currentAvatar.name}, a friendly and patient AI English language coach. Your goal is to help me improve my conversational English and pronunciation. We will have a natural conversation. After I finish speaking, please provide brief, constructive feedback on my pronunciation or grammar, highlighting one or two key areas for improvement. Then, continue the conversation by asking a question or making a relevant comment. Keep your feedback encouraging and your responses natural.`
 
         sessionPromiseRef.current = ai.live.connect({
             model: 'gemini-2.5-flash-native-audio-preview-09-2025',
@@ -86,7 +121,7 @@ const App: React.FC = () => {
                 speechConfig: {
                     voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Zephyr' } },
                 },
-                systemInstruction: "You are Eva, a friendly and patient AI English language coach. Your goal is to help me improve my conversational English and pronunciation. We will have a natural conversation. After I finish speaking, please provide brief, constructive feedback on my pronunciation or grammar, highlighting one or two key areas for improvement. Then, continue the conversation by asking a question or making a relevant comment. Keep your feedback encouraging and your responses natural.",
+                systemInstruction: systemInstruction,
                 outputAudioTranscription: {},
                 inputAudioTranscription: {},
             },
@@ -120,7 +155,7 @@ const App: React.FC = () => {
                        const audioBuffer = await decodeAudioData(decode(audioData), outputAudioContext, 24000, 1);
                        const source = outputAudioContext.createBufferSource();
                        source.buffer = audioBuffer;
-                       source.connect(outputAudioContext.destination);
+                       source.connect(analyserRef.current!);
                        
                        source.addEventListener('ended', () => {
                            audioSources.current.delete(source);
@@ -144,7 +179,6 @@ const App: React.FC = () => {
                 },
                 onclose: () => {
                     console.log('Session closed.');
-                    // Don't change status here, as stopSession will handle it.
                 },
             },
         });
@@ -153,38 +187,36 @@ const App: React.FC = () => {
         setStatusText("Could not access camera/mic. Check permissions.");
         setIsSessionActive(false);
     }
-  }, [ai.live, stopSession]);
+  }, [ai.live, stopSession, currentAvatar.name]);
   
+  // FIX: The `isFinal` property does not exist on the `Transcription` type from the Gemini API.
+  // The logic has been updated to manage the finality of transcript entries
+  // based on the `turnComplete` event, which is the correct approach.
   const handleTranscription = (message: LiveServerMessage) => {
     setTranscript(prev => {
         let newTranscript = [...prev];
         
         if (message.serverContent?.inputTranscription) {
             const text = message.serverContent.inputTranscription.text;
-            const isFinal = message.serverContent.inputTranscription.isFinal;
             const lastEntry = newTranscript[newTranscript.length - 1];
 
             if (lastEntry && lastEntry.speaker === 'You' && !lastEntry.isFinal) {
                 lastEntry.text += text;
-                lastEntry.isFinal = isFinal;
             } else {
-                newTranscript.push({ speaker: 'You', text, isFinal });
+                newTranscript.push({ speaker: 'You', text, isFinal: false });
             }
         } else if (message.serverContent?.outputTranscription) {
             const text = message.serverContent.outputTranscription.text;
-            const isFinal = message.serverContent.outputTranscription.isFinal;
             const lastEntry = newTranscript[newTranscript.length - 1];
 
             if (lastEntry && lastEntry.speaker === 'AI' && !lastEntry.isFinal) {
                 lastEntry.text += text;
-                lastEntry.isFinal = isFinal;
             } else {
-                newTranscript.push({ speaker: 'AI', text, isFinal });
+                newTranscript.push({ speaker: 'AI', text, isFinal: false });
             }
         }
         
         if (message.serverContent?.turnComplete) {
-            // Mark the last entries as final if they are not already.
             const lastUser = newTranscript.slice().reverse().find(e => e.speaker === 'You');
             if(lastUser) lastUser.isFinal = true;
 
@@ -206,38 +238,155 @@ const App: React.FC = () => {
       startSession();
     }
   }, [isSessionActive, startSession, stopSession]);
+
+  useEffect(() => {
+    if (isSessionActive) {
+      sessionEndedRef.current = true;
+    } else if (sessionEndedRef.current) {
+      sessionEndedRef.current = false;
+      if (transcript.length > 2) {
+        const newConversation: SavedConversation = {
+          id: Date.now().toString(),
+          timestamp: new Date().toISOString(),
+          transcript: transcript.map(t => ({ ...t, isFinal: true })),
+          coach: {
+            name: currentAvatar.name,
+            avatarUrl: currentAvatar.neutral,
+          },
+        };
+        saveConversation(newConversation);
+        setSavedConversations(prev => [newConversation, ...prev]);
+      }
+    }
+  }, [isSessionActive, transcript, currentAvatar]);
   
   useEffect(() => {
-    // Cleanup on unmount
+    let animationFrameId: number | null = null;
+    
+    const checkSpeaking = () => {
+        if (!isSessionActive || !analyserRef.current) {
+            setIsAiSpeaking(false);
+            return;
+        }
+
+        const analyser = analyserRef.current;
+        const bufferLength = analyser.frequencyBinCount;
+        const dataArray = new Uint8Array(bufferLength);
+        analyser.getByteTimeDomainData(dataArray);
+
+        let sumOfSquares = 0;
+        for (let i = 0; i < bufferLength; i++) {
+            const value = dataArray[i] - 128;
+            sumOfSquares += value * value;
+        }
+
+        const rms = Math.sqrt(sumOfSquares / bufferLength);
+        const SPEAKING_THRESHOLD = 1.5;
+
+        setIsAiSpeaking(rms > SPEAKING_THRESHOLD);
+
+        animationFrameId = requestAnimationFrame(checkSpeaking);
+    };
+
+    if (isSessionActive) {
+        checkSpeaking();
+    } else {
+        setIsAiSpeaking(false);
+    }
+
+    return () => {
+        if (animationFrameId) {
+            cancelAnimationFrame(animationFrameId);
+        }
+    };
+  }, [isSessionActive]);
+
+
+  useEffect(() => {
     return () => {
         stopSession();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const handleShowHistory = () => {
+    setSelectedConversation(null);
+    setIsHistoryOpen(true);
+  };
+  
+  const handleCloseHistory = () => {
+    setIsHistoryOpen(false);
+  };
+  
+  const handleSelectConversation = (conversation: SavedConversation) => {
+    setSelectedConversation(conversation);
+  };
+  
+  const handleDeleteConversation = (id: string) => {
+    const updatedHistory = deleteConversation(id);
+    setSavedConversations(updatedHistory);
+    if (selectedConversation?.id === id) {
+      setSelectedConversation(null);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-900 text-white flex flex-col p-4 sm:p-6 lg:p-8 font-sans">
-      <header className="text-center mb-6">
+      <header className="text-center mb-6 relative">
         <h1 className="text-3xl sm:text-4xl font-bold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-blue-500">
           AI English Speaking Coach
         </h1>
-        <p className="text-gray-400 mt-2">Practice your conversational English with Eva, your personal AI tutor.</p>
+        <p className="text-gray-400 mt-2">Practice your conversational English with your personal AI tutor.</p>
+        <div className="absolute top-0 right-0 flex items-center space-x-2">
+            <span className="text-sm text-gray-400 hidden sm:inline">Change Coach:</span>
+            {AVATARS.map(avatar => (
+                <button
+                    key={avatar.name}
+                    onClick={() => setCurrentAvatar(avatar)}
+                    disabled={isSessionActive}
+                    className={`w-10 h-10 sm:w-12 sm:h-12 rounded-full overflow-hidden border-2 transition-all ${currentAvatar.name === avatar.name ? 'border-green-500 scale-110' : 'border-transparent hover:border-gray-500'} disabled:opacity-50 disabled:cursor-not-allowed`}
+                    title={`Select ${avatar.name}`}
+                >
+                    <img src={avatar.neutral} alt={avatar.name} className="w-full h-full object-cover" />
+                </button>
+            ))}
+        </div>
       </header>
 
       <main className="flex-grow flex flex-col gap-6">
         <div className="flex-grow flex flex-col md:flex-row gap-6">
           <VideoPanel name="You" stream={userStream} isSessionActive={isSessionActive} />
-          <VideoPanel name="AI Coach Eva" avatarUrl="https://picsum.photos/seed/ai/800/600" isSessionActive={isSessionActive} />
+          <VideoPanel 
+            name={`AI Coach ${currentAvatar.name}`} 
+            neutralAvatarUrl={currentAvatar.neutral}
+            talkingAvatarUrl={currentAvatar.talking}
+            isSessionActive={isSessionActive}
+            isSpeaking={isAiSpeaking}
+            />
         </div>
         
         <div className="flex-shrink-0">
-          <TranscriptDisplay transcript={transcript} />
+          <TranscriptDisplay transcript={transcript} aiAvatarUrl={currentAvatar.neutral} />
         </div>
       </main>
 
       <footer className="flex-shrink-0 mt-4">
-        <Controls isSessionActive={isSessionActive} onToggleSession={handleToggleSession} statusText={statusText} />
+        <Controls 
+            isSessionActive={isSessionActive} 
+            onToggleSession={handleToggleSession} 
+            statusText={statusText}
+            onShowHistory={handleShowHistory}
+        />
       </footer>
+
+      <HistoryPanel
+        isOpen={isHistoryOpen}
+        onClose={handleCloseHistory}
+        conversations={savedConversations}
+        selectedConversation={selectedConversation}
+        onSelectConversation={handleSelectConversation}
+        onDeleteConversation={handleDeleteConversation}
+      />
     </div>
   );
 };

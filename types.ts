@@ -4,3 +4,13 @@ export interface TranscriptEntry {
   text: string;
   isFinal: boolean;
 }
+
+export interface SavedConversation {
+  id: string;
+  timestamp: string;
+  transcript: TranscriptEntry[];
+  coach: {
+    name: string;
+    avatarUrl: string;
+  };
+}

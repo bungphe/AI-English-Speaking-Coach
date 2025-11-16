@@ -4,9 +4,11 @@ import { TranscriptEntry } from '../types';
 
 interface TranscriptDisplayProps {
   transcript: TranscriptEntry[];
+  aiAvatarUrl: string;
+  containerClassName?: string;
 }
 
-const TranscriptDisplay: React.FC<TranscriptDisplayProps> = ({ transcript }) => {
+const TranscriptDisplay: React.FC<TranscriptDisplayProps> = ({ transcript, aiAvatarUrl, containerClassName }) => {
   const endOfMessagesRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -14,13 +16,13 @@ const TranscriptDisplay: React.FC<TranscriptDisplayProps> = ({ transcript }) => 
   }, [transcript]);
 
   return (
-    <div className="flex-grow bg-gray-800 bg-opacity-50 rounded-2xl p-6 h-48 overflow-y-auto custom-scrollbar">
+    <div className={containerClassName || "flex-grow bg-gray-800 bg-opacity-50 rounded-2xl p-6 h-48 overflow-y-auto custom-scrollbar"}>
       <div className="flex flex-col space-y-4">
         {transcript.map((entry, index) => (
           <div key={index} className={`flex items-start gap-3 ${entry.speaker === 'You' ? 'justify-end' : 'justify-start'}`}>
             {entry.speaker === 'AI' && (
-              <div className="w-8 h-8 rounded-full bg-green-500 flex items-center justify-center flex-shrink-0">
-                <i className="fas fa-robot text-white"></i>
+              <div className="w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center flex-shrink-0 overflow-hidden">
+                <img src={aiAvatarUrl} alt="AI icon" className="w-full h-full object-cover" />
               </div>
             )}
             <div className={`max-w-md p-3 rounded-xl ${entry.speaker === 'You' ? 'bg-blue-600 rounded-br-none' : 'bg-gray-700 rounded-bl-none'} ${!entry.isFinal ? 'opacity-70' : ''}`}>

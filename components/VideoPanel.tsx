@@ -1,14 +1,15 @@
-
 import React from 'react';
 
 interface VideoPanelProps {
   name: string;
   stream?: MediaStream | null;
-  avatarUrl?: string;
+  neutralAvatarUrl?: string;
+  talkingAvatarUrl?: string;
   isSessionActive: boolean;
+  isSpeaking?: boolean;
 }
 
-const VideoPanel: React.FC<VideoPanelProps> = ({ name, stream, avatarUrl, isSessionActive }) => {
+const VideoPanel: React.FC<VideoPanelProps> = ({ name, stream, neutralAvatarUrl, talkingAvatarUrl, isSessionActive, isSpeaking }) => {
   const videoRef = React.useRef<HTMLVideoElement>(null);
 
   React.useEffect(() => {
@@ -17,10 +18,11 @@ const VideoPanel: React.FC<VideoPanelProps> = ({ name, stream, avatarUrl, isSess
     }
   }, [stream]);
   
-  const borderColor = isSessionActive ? 'border-green-500' : 'border-gray-600';
+  const borderColor = isSessionActive ? (isSpeaking ? 'border-yellow-400' : 'border-green-500') : 'border-gray-600';
+  const borderAnimation = isSessionActive && isSpeaking ? 'animate-pulse-border' : '';
 
   return (
-    <div className={`relative flex-1 bg-black rounded-2xl overflow-hidden shadow-2xl border-2 ${borderColor} transition-all duration-500`}>
+    <div className={`relative flex-1 bg-black rounded-2xl overflow-hidden shadow-2xl border-4 ${borderColor} ${borderAnimation} transition-all duration-300`}>
       <div className="absolute top-4 left-4 bg-black bg-opacity-60 px-4 py-1 rounded-full z-10">
         <p className="text-white font-semibold">{name}</p>
       </div>
@@ -34,10 +36,31 @@ const VideoPanel: React.FC<VideoPanelProps> = ({ name, stream, avatarUrl, isSess
         />
       ) : (
         <div className="w-full h-full flex items-center justify-center bg-gray-800">
-          <img src={avatarUrl} alt="AI Avatar" className="w-full h-full object-cover" />
-          <div className={`absolute w-32 h-32 rounded-full ${isSessionActive ? 'bg-green-500/50 animate-pulse' : 'bg-gray-500/30'}`}></div>
+          <img 
+            src={isSpeaking && talkingAvatarUrl ? talkingAvatarUrl : neutralAvatarUrl} 
+            alt="AI Avatar" 
+            className={`w-full h-full object-cover transition-all duration-200 ${isSpeaking ? 'talking-animation' : ''}`} 
+          />
         </div>
       )}
+       <style>{`
+        @keyframes talking-pulse {
+          0% { transform: scale(1); }
+          50% { transform: scale(1.02); }
+          100% { transform: scale(1); }
+        }
+        .talking-animation {
+          animation: talking-pulse 0.8s ease-in-out infinite;
+        }
+
+        @keyframes pulse-border {
+          0%, 100% { box-shadow: 0 0 0 0px rgba(250, 204, 21, 0.5); }
+          50% { box-shadow: 0 0 0 6px rgba(250, 204, 21, 0); }
+        }
+        .animate-pulse-border {
+          animation: pulse-border 1.5s infinite;
+        }
+      `}</style>
     </div>
   );
 };
