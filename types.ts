@@ -14,3 +14,8 @@ export interface SavedConversation {
   };
   feedback: string;
 }
+
+export interface VocabularyWord {
+  word: string;
+  definition: string;
+}

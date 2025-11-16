@@ -6,7 +6,8 @@ import VideoPanel from './components/VideoPanel';
 import Controls from './components/Controls';
 import TranscriptDisplay from './components/TranscriptDisplay';
 import HistoryPanel from './components/HistoryPanel';
-import { TranscriptEntry, SavedConversation } from './types';
+import VocabularyCard from './components/VocabularyCard';
+import { TranscriptEntry, SavedConversation, VocabularyWord } from './types';
 
 const API_KEY = process.env.API_KEY;
 
@@ -34,6 +35,8 @@ const App: React.FC = () => {
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [selectedConversation, setSelectedConversation] = useState<SavedConversation | null>(null);
   const [isGeneratingFeedback, setIsGeneratingFeedback] = useState(false);
+  const [practiceMode, setPracticeMode] = useState<'conversation' | 'vocabulary'>('conversation');
+  const [vocabularyWord, setVocabularyWord] = useState<VocabularyWord | null>(null);
 
   const sessionPromiseRef = useRef<Promise<any> | null>(null);
   const inputAudioContextRef = useRef<AudioContext | null>(null);
@@ -94,6 +97,7 @@ const App: React.FC = () => {
   const startSession = useCallback(async () => {
     setStatusText('Requesting permissions...');
     setTranscript([]);
+    setVocabularyWord(null);
 
     try {
         const videoStream = await navigator.mediaDevices.getUserMedia({ video: true });
@@ -113,7 +117,10 @@ const App: React.FC = () => {
         analyserRef.current = analyser;
         analyser.connect(outputAudioContext.destination);
         
-        const systemInstruction = `You are ${currentAvatar.name}, a friendly and patient AI English language coach. Your goal is to help me improve my conversational English and pronunciation. We will have a natural conversation. After I finish speaking, please provide brief, constructive feedback on my pronunciation or grammar, highlighting one or two key areas for improvement. Then, continue the conversation by asking a question or making a relevant comment. Keep your feedback encouraging and your responses natural.`
+        const conversationInstruction = `You are ${currentAvatar.name}, a friendly and patient AI English language coach. Your goal is to help me improve my conversational English and pronunciation. We will have a natural conversation. After I finish speaking, please provide brief, constructive feedback on my pronunciation or grammar, highlighting one or two key areas for improvement. Then, continue the conversation by asking a question or making a relevant comment. Keep your feedback encouraging and your responses natural.`
+        const vocabularyInstruction = `You are ${currentAvatar.name}, an AI vocabulary coach. Your task is to help me learn new English words. Start by introducing one new, interesting English word. You MUST format your response with the word and definition first, like this: **Word:** [The Word] **Definition:** [The Definition]. Then, provide an example sentence and ask me to use the word in a sentence of my own. After I respond, evaluate my sentence for correct usage, grammar, and pronunciation. Then, introduce the next word in the same format.`;
+        
+        const systemInstruction = practiceMode === 'conversation' ? conversationInstruction : vocabularyInstruction;
 
         sessionPromiseRef.current = ai.live.connect({
             model: 'gemini-2.5-flash-native-audio-preview-09-2025',
@@ -183,12 +190,13 @@ const App: React.FC = () => {
                 },
             },
         });
-    } catch (error) {
+    } catch (error)
+ {
         console.error("Failed to start session:", error);
         setStatusText("Could not access camera/mic. Check permissions.");
         setIsSessionActive(false);
     }
-  }, [ai.live, stopSession, currentAvatar.name]);
+  }, [ai.live, stopSession, currentAvatar.name, practiceMode]);
   
   const handleTranscription = (message: LiveServerMessage) => {
     setTranscript(prev => {
@@ -207,10 +215,20 @@ const App: React.FC = () => {
             const text = message.serverContent.outputTranscription.text;
             const lastEntry = newTranscript[newTranscript.length - 1];
 
+            let combinedText;
             if (lastEntry && lastEntry.speaker === 'AI' && !lastEntry.isFinal) {
                 lastEntry.text += text;
+                combinedText = lastEntry.text;
             } else {
                 newTranscript.push({ speaker: 'AI', text, isFinal: false });
+                combinedText = text;
+            }
+            
+            if (practiceMode === 'vocabulary') {
+                const match = combinedText.match(/\*\*Word:\*\*\s*(.*?)\s*\*\*Definition:\*\*\s*(.*)/);
+                if (match && match[1] && match[2]) {
+                    setVocabularyWord({ word: match[1].trim(), definition: match[2].trim() });
+                }
             }
         }
         
@@ -358,7 +376,7 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gray-900 text-white flex flex-col p-4 sm:p-6 lg:p-8 font-sans">
-      <header className="text-center mb-6 relative">
+      <header className="text-center mb-4 relative">
         <h1 className="text-3xl sm:text-4xl font-bold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-blue-500">
           AI English Speaking Coach
         </h1>
@@ -378,8 +396,29 @@ const App: React.FC = () => {
             ))}
         </div>
       </header>
+      
+      <div className="mb-4 flex justify-center border-b border-gray-700">
+        <button
+            onClick={() => setPracticeMode('conversation')}
+            disabled={isSessionActive || isGeneratingFeedback}
+            className={`px-6 py-3 text-lg font-semibold border-b-4 transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${practiceMode === 'conversation' ? 'border-green-500 text-white' : 'border-transparent text-gray-400 hover:text-white'}`}
+        >
+            <i className="fas fa-comments mr-2"></i>Conversation
+        </button>
+        <button
+            onClick={() => setPracticeMode('vocabulary')}
+            disabled={isSessionActive || isGeneratingFeedback}
+            className={`px-6 py-3 text-lg font-semibold border-b-4 transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${practiceMode === 'vocabulary' ? 'border-blue-500 text-white' : 'border-transparent text-gray-400 hover:text-white'}`}
+        >
+            <i className="fas fa-book mr-2"></i>Vocabulary
+        </button>
+      </div>
+
 
       <main className="flex-grow flex flex-col gap-6">
+        {practiceMode === 'vocabulary' && vocabularyWord && (
+            <VocabularyCard word={vocabularyWord.word} definition={vocabularyWord.definition} />
+        )}
         <div className="flex-grow flex flex-col md:flex-row gap-6">
           <VideoPanel name="You" stream={userStream} isSessionActive={isSessionActive} />
           <VideoPanel 
