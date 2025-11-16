@@ -1,0 +1,8 @@
+{
+  "name": "AI English Speaking Coach",
+  "description": "An interactive web application where an AI coach helps users improve their English speaking skills through real-time conversation, transcription, and feedback.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
