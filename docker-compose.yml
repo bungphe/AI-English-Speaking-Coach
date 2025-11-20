@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  web:
+    build:
+      context: .
+    ports:
+      - "8813:80"
+    environment:
+      - API_KEYS=AIzaSyCP-EkfIg4PuGTedP4RM2YtCG6RjxTKw0I,AIzaSyC2lOHpLUhh2lSTR3HHgCxGy1KVkAVm7y0,AIzaSyAKWMfMeHpU9OFqeh8RUr11GsQIj4e5WT8,AIzaSyAU4suPVzCOgla62DM-dG1OUIeBCemDhGk,AIzaSyA3tH-HrWBSsQn7ens9Hu4yBaWIKyeQ27c,AIzaSyAmK7WnNkFQuJ0mcnELsRonlftaHemFTO8
+    networks:
+      - app_network
+
+networks:
+  app_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.200.0.0/16
