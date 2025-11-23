@@ -1,36 +1,42 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+'use client';
+
+import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { GoogleGenAI, LiveServerMessage, Modality } from "@google/genai";
-import { decode, decodeAudioData, createPcmBlob } from './services/audioUtils';
-import { getHistory, saveConversation, deleteConversation } from './services/historyService';
-import VideoPanel from './components/VideoPanel';
-import Controls from './components/Controls';
-import TranscriptDisplay from './components/TranscriptDisplay';
-import HistoryPanel from './components/HistoryPanel';
-import VocabularyCard from './components/VocabularyCard';
-import { TranscriptEntry, SavedConversation, VocabularyWord } from './types';
+import { decode, decodeAudioData, createPcmBlob } from '../services/audioUtils';
+import { getHistory, saveConversation, deleteConversation } from '../services/historyService';
+import VideoPanel from './VideoPanel';
+import Controls from './Controls';
+import TranscriptDisplay from './TranscriptDisplay';
+import HistoryPanel from './HistoryPanel';
+import VocabularyCard from './VocabularyCard';
+import { TranscriptEntry, SavedConversation, VocabularyWord } from '../types';
 
-const API_KEY = process.env.API_KEY;
-
+// Updated to use "Notionists" (Infographic style) and "Bottts" in PNG format for better compatibility
 const AVATARS = [
     {
       name: 'Eva',
-      neutral: 'https://storage.googleapis.com/aai-web-samples/speak-to-me/images/eva_neutral.png',
-      talking: 'https://storage.googleapis.com/aai-web-samples/speak-to-me/images/eva_talking.png',
+      neutral: 'https://api.dicebear.com/9.x/notionists/png?seed=Eva&backgroundColor=e5e7eb',
+      talking: 'https://api.dicebear.com/9.x/notionists/png?seed=Eva&backgroundColor=ffdfbf&mouth=smile',
     },
     {
       name: 'Bot',
-      neutral: 'https://storage.googleapis.com/aai-web-samples/speak-to-me/images/bot_neutral.png',
-      talking: 'https://storage.googleapis.com/aai-web-samples/speak-to-me/images/bot_talking.png',
+      neutral: 'https://api.dicebear.com/9.x/bottts/png?seed=Bot&backgroundColor=e5e7eb',
+      talking: 'https://api.dicebear.com/9.x/bottts/png?seed=Bot&backgroundColor=ffdfbf&mouth=smile',
     }
   ];
 
-const App: React.FC = () => {
+interface VoiceCoachProps {
+  apiKey: string;
+}
+
+const VoiceCoach: React.FC<VoiceCoachProps> = ({ apiKey }) => {
   const [isSessionActive, setIsSessionActive] = useState(false);
   const [statusText, setStatusText] = useState('Click start to begin');
   const [userStream, setUserStream] = useState<MediaStream | null>(null);
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
   const [currentAvatar, setCurrentAvatar] = useState(AVATARS[0]);
   const [isAiSpeaking, setIsAiSpeaking] = useState(false);
+  const [isUserSpeaking, setIsUserSpeaking] = useState(false);
   const [savedConversations, setSavedConversations] = useState<SavedConversation[]>([]);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [selectedConversation, setSelectedConversation] = useState<SavedConversation | null>(null);
@@ -40,6 +46,7 @@ const App: React.FC = () => {
 
   const sessionPromiseRef = useRef<Promise<any> | null>(null);
   const inputAudioContextRef = useRef<AudioContext | null>(null);
+  const inputAnalyserRef = useRef<AnalyserNode | null>(null);
   const outputAudioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
@@ -48,7 +55,8 @@ const App: React.FC = () => {
   const audioSources = useRef<Set<AudioBufferSourceNode>>(new Set());
   const sessionEndedRef = useRef(false);
 
-  const ai = new GoogleGenAI({ apiKey: API_KEY });
+  // Memoize the AI client to prevent recreation on every render
+  const ai = useMemo(() => new GoogleGenAI({ apiKey }), [apiKey]);
 
   useEffect(() => {
     setSavedConversations(getHistory());
@@ -82,6 +90,10 @@ const App: React.FC = () => {
     if (analyserRef.current) {
         analyserRef.current.disconnect();
         analyserRef.current = null;
+    }
+    if (inputAnalyserRef.current) {
+        inputAnalyserRef.current.disconnect();
+        inputAnalyserRef.current = null;
     }
     if (outputAudioContextRef.current && outputAudioContextRef.current.state !== 'closed') {
       outputAudioContextRef.current.close();
@@ -117,7 +129,16 @@ const App: React.FC = () => {
         analyserRef.current = analyser;
         analyser.connect(outputAudioContext.destination);
         
-        const conversationInstruction = `You are ${currentAvatar.name}, a friendly and patient AI English language coach. Your goal is to help me improve my conversational English and pronunciation. We will have a natural conversation. After I finish speaking, please provide brief, constructive feedback on my pronunciation or grammar, highlighting one or two key areas for improvement. Then, continue the conversation by asking a question or making a relevant comment. Keep your feedback encouraging and your responses natural.`
+        const conversationInstruction = `You are ${currentAvatar.name}, a friendly and patient AI English language coach. Your goal is to help me improve my conversational English and pronunciation. We will have a natural conversation. 
+        
+        **CRITICAL Pronunciation Guidance Rule:**
+        When I speak, listen carefully to my pronunciation. If I mispronounce a word or phrase, you MUST gently correct me in your very next response by:
+        1. Identifying the specific word.
+        2. Showing the correct IPA pronunciation (e.g., /wɜːrd/).
+        3. Providing a specific "Mouth Tip" on articulation (e.g., "Round your lips more", "Place your tongue behind your top teeth", or "Relax your jaw").
+        
+        After the brief correction, continue the conversation naturally by asking a question or making a relevant comment. Keep the flow natural.`;
+
         const vocabularyInstruction = `You are ${currentAvatar.name}, an AI vocabulary coach. Your task is to help me learn new English words. Start by introducing one new, interesting English word. You MUST format your response with the word and definition first, like this: **Word:** [The Word] **Definition:** [The Definition]. Then, provide an example sentence and ask me to use the word in a sentence of my own. After I respond, evaluate my sentence for correct usage, grammar, and pronunciation. Then, introduce the next word in the same format.`;
         
         const systemInstruction = practiceMode === 'conversation' ? conversationInstruction : vocabularyInstruction;
@@ -137,6 +158,13 @@ const App: React.FC = () => {
                 onopen: () => {
                     setStatusText('Connected. Start speaking!');
                     const source = inputAudioContextRef.current!.createMediaStreamSource(localStreamRef.current!);
+                    
+                    // Setup User Voice Detection
+                    const inputAnalyser = inputAudioContextRef.current!.createAnalyser();
+                    inputAnalyser.fftSize = 256;
+                    inputAnalyserRef.current = inputAnalyser;
+                    source.connect(inputAnalyser);
+
                     const processor = inputAudioContextRef.current!.createScriptProcessor(4096, 1, 1);
                     scriptProcessorRef.current = processor;
 
@@ -154,7 +182,8 @@ const App: React.FC = () => {
                 onmessage: async (message: LiveServerMessage) => {
                     handleTranscription(message);
                     
-                    const audioData = message.serverContent?.modelTurn?.parts[0]?.inlineData.data;
+                    const audioData = message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
+                    
                     if (audioData) {
                        const outputAudioContext = outputAudioContextRef.current!;
                        const nextStartTime = Math.max(nextStartTimeRef.current, outputAudioContext.currentTime);
@@ -256,7 +285,69 @@ const App: React.FC = () => {
   }, [isSessionActive, startSession, stopSession]);
 
   const generateFeedback = async (finalTranscript: TranscriptEntry[]) => {
-    const prompt = `Based on the following conversation transcript between an AI English Coach and a user, please provide a concise "Feedback Summary" for the user. Focus on 1-2 key grammar points and 1-2 pronunciation suggestions they can work on. Frame the feedback to be encouraging and constructive. Format the output in Markdown.\n\nTranscript:\n${finalTranscript.map(t => `${t.speaker}: ${t.text}`).join('\n')}`;
+    const prompt = `
+    You are an expert English Language Coach. Analyze the following conversation transcript.
+    
+    Generate a comprehensive feedback report in **HTML format**. 
+    CRITICAL: Do not include markdown code blocks (like \`\`\`html) or quotes. Return ONLY the raw HTML string.
+    
+    The report must include these 4 sections, structured exactly as follows with the provided Tailwind classes:
+    
+    1.  <div class="mb-6">
+            <h3 class="text-xl font-bold text-blue-400 mb-3 flex items-center"><i class="fas fa-chart-simple mr-2"></i> Performance Scorecard</h3>
+            <div class="bg-gray-800 rounded-lg p-4 shadow-sm">
+                <ul class="space-y-2 text-gray-300">
+                   <li><span class="font-semibold text-white">Estimated Proficiency Level:</span> [CEFR A1-C2]</li>
+                   <li><span class="font-semibold text-white">Vocabulary Range Score:</span> [1-10]</li>
+                   <li><span class="font-semibold text-white">Grammar Accuracy Score:</span> [1-10]</li>
+                   <li><span class="font-semibold text-white">Pronunciation Clarity Score:</span> [1-10]</li>
+                </ul>
+            </div>
+        </div>
+    
+    2.  <div class="mb-6">
+            <h3 class="text-xl font-bold text-yellow-400 mb-3 flex items-center"><i class="fas fa-microphone-lines mr-2"></i> Pronunciation Workshop</h3>
+            <p class="text-sm text-gray-400 mb-3">Focus words from the session:</p>
+            <div class="grid gap-4 md:grid-cols-2">
+                <!-- Repeat this block for 2-3 difficult words from the transcript -->
+                <div class="bg-gray-800 p-4 rounded-lg border-l-4 border-yellow-500">
+                    <div class="flex justify-between items-center mb-2">
+                        <span class="font-bold text-white text-lg">[Word]</span>
+                        <span class="text-yellow-300 font-mono bg-gray-900 px-2 py-0.5 rounded text-sm">/[IPA]/</span>
+                    </div>
+                    <div class="text-sm text-gray-300 space-y-2">
+                        <p class="flex items-start"><span class="mr-2 text-yellow-500">👂</span> <span><strong>Sound it out:</strong> [Phonetic spelling]</span></p>
+                        <p class="flex items-start"><span class="mr-2 text-yellow-500">👄</span> <span><strong>Mouth Tip:</strong> [Specific tip, e.g. "Tongue behind teeth"]</span></p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    
+    3.  <div class="mb-6">
+            <h3 class="text-xl font-bold text-green-400 mb-3 flex items-center"><i class="fas fa-pen-to-square mr-2"></i> Grammar & Phrasing</h3>
+            <div class="space-y-3">
+                <!-- Repeat for 1-2 corrections -->
+                <div class="bg-gray-800 p-4 rounded-lg">
+                    <div class="flex flex-col sm:flex-row sm:items-center text-gray-300 mb-2 gap-2">
+                        <span class="text-red-400 line-through bg-red-900/20 px-2 py-0.5 rounded">[Original]</span>
+                        <i class="fas fa-arrow-right text-gray-500 hidden sm:block"></i>
+                        <span class="text-green-400 font-bold bg-green-900/20 px-2 py-0.5 rounded">[Better Version]</span>
+                    </div>
+                    <p class="text-sm text-gray-400 italic border-t border-gray-700 pt-2 mt-2">💡 [Explanation]</p>
+                </div>
+            </div>
+        </div>
+    
+    4.  <div>
+            <h3 class="text-xl font-bold text-purple-400 mb-3 flex items-center"><i class="fas fa-bullseye mr-2"></i> Focus for Next Time</h3>
+            <div class="bg-gradient-to-r from-purple-900/40 to-blue-900/40 p-4 rounded-lg border border-purple-500/30">
+                <p class="text-gray-200 font-medium"><i class="fas fa-star text-yellow-500 mr-2"></i> [One concrete, actionable goal]</p>
+            </div>
+        </div>
+
+    **Transcript:**
+    ${finalTranscript.map(t => `${t.speaker}: ${t.text}`).join('\n')}
+    `;
 
     try {
         const response = await ai.models.generateContent({
@@ -266,7 +357,7 @@ const App: React.FC = () => {
         return response.text;
     } catch (error) {
         console.error("Error generating feedback:", error);
-        return "Could not generate feedback for this session.";
+        return "<p class='text-red-400'>Could not generate feedback for this session.</p>";
     }
   };
   
@@ -304,30 +395,55 @@ const App: React.FC = () => {
     }
   }, [isSessionActive, transcript, currentAvatar, ai.models]);
   
+  // This useEffect now just ensures the animation loop runs for volume monitoring to set general state,
+  // but visualization is handled inside VideoPanel via audioAnalyser prop.
   useEffect(() => {
     let animationFrameId: number | null = null;
     
     const checkSpeaking = () => {
-        if (!isSessionActive || !analyserRef.current) {
+        if (!isSessionActive) {
             setIsAiSpeaking(false);
+            setIsUserSpeaking(false);
             return;
         }
 
-        const analyser = analyserRef.current;
-        const bufferLength = analyser.frequencyBinCount;
-        const dataArray = new Uint8Array(bufferLength);
-        analyser.getByteTimeDomainData(dataArray);
-
-        let sumOfSquares = 0;
-        for (let i = 0; i < bufferLength; i++) {
-            const value = dataArray[i] - 128;
-            sumOfSquares += value * value;
-        }
-
-        const rms = Math.sqrt(sumOfSquares / bufferLength);
         const SPEAKING_THRESHOLD = 1.5;
 
-        setIsAiSpeaking(rms > SPEAKING_THRESHOLD);
+        // Check AI Volume for general state (e.g. controls)
+        if (analyserRef.current) {
+            const analyser = analyserRef.current;
+            const bufferLength = analyser.frequencyBinCount;
+            const dataArray = new Uint8Array(bufferLength);
+            analyser.getByteTimeDomainData(dataArray);
+
+            let sumOfSquares = 0;
+            for (let i = 0; i < bufferLength; i++) {
+                const value = dataArray[i] - 128;
+                sumOfSquares += value * value;
+            }
+            const rms = Math.sqrt(sumOfSquares / bufferLength);
+            setIsAiSpeaking(rms > SPEAKING_THRESHOLD);
+        } else {
+             setIsAiSpeaking(false);
+        }
+
+        // Check User Volume for general state
+        if (inputAnalyserRef.current) {
+            const analyser = inputAnalyserRef.current;
+            const bufferLength = analyser.frequencyBinCount;
+            const dataArray = new Uint8Array(bufferLength);
+            analyser.getByteTimeDomainData(dataArray);
+
+            let sumOfSquares = 0;
+            for (let i = 0; i < bufferLength; i++) {
+                const value = dataArray[i] - 128;
+                sumOfSquares += value * value;
+            }
+            const rms = Math.sqrt(sumOfSquares / bufferLength);
+            setIsUserSpeaking(rms > SPEAKING_THRESHOLD);
+        } else {
+            setIsUserSpeaking(false);
+        }
 
         animationFrameId = requestAnimationFrame(checkSpeaking);
     };
@@ -336,6 +452,7 @@ const App: React.FC = () => {
         checkSpeaking();
     } else {
         setIsAiSpeaking(false);
+        setIsUserSpeaking(false);
     }
 
     return () => {
@@ -376,24 +493,29 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gray-900 text-white flex flex-col p-4 sm:p-6 lg:p-8 font-sans">
-      <header className="text-center mb-4 relative">
-        <h1 className="text-3xl sm:text-4xl font-bold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-blue-500">
-          AI English Speaking Coach
-        </h1>
-        <p className="text-gray-400 mt-2">Practice your conversational English with your personal AI tutor.</p>
-        <div className="absolute top-0 right-0 flex items-center space-x-2">
-            <span className="text-sm text-gray-400 hidden sm:inline">Change Coach:</span>
-            {AVATARS.map(avatar => (
-                <button
-                    key={avatar.name}
-                    onClick={() => setCurrentAvatar(avatar)}
-                    disabled={isSessionActive || isGeneratingFeedback}
-                    className={`w-10 h-10 sm:w-12 sm:h-12 rounded-full overflow-hidden border-2 transition-all ${currentAvatar.name === avatar.name ? 'border-green-500 scale-110' : 'border-transparent hover:border-gray-500'} disabled:opacity-50 disabled:cursor-not-allowed`}
-                    title={`Select ${avatar.name}`}
-                >
-                    <img src={avatar.neutral} alt={avatar.name} className="w-full h-full object-cover" />
-                </button>
-            ))}
+      <header className="flex flex-col md:flex-row items-center justify-between gap-4 mb-6">
+        <div className="text-center md:text-left">
+            <h1 className="text-3xl sm:text-4xl font-bold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-blue-500">
+              AI English Speaking Coach
+            </h1>
+            <p className="text-gray-400 mt-2 text-sm sm:text-base">Practice your conversational English with your personal AI tutor.</p>
+        </div>
+        
+        <div className="flex items-center gap-3 bg-gray-800/50 px-4 py-2 rounded-full border border-gray-700/50 backdrop-blur-sm">
+            <span className="text-sm text-gray-400 font-medium">Coach:</span>
+            <div className="flex gap-2">
+                {AVATARS.map(avatar => (
+                    <button
+                        key={avatar.name}
+                        onClick={() => setCurrentAvatar(avatar)}
+                        disabled={isSessionActive || isGeneratingFeedback}
+                        className={`w-10 h-10 sm:w-12 sm:h-12 rounded-full overflow-hidden border-2 transition-all ${currentAvatar.name === avatar.name ? 'border-green-500 scale-110' : 'border-transparent hover:border-gray-500'} disabled:opacity-50 disabled:cursor-not-allowed`}
+                        title={`Select ${avatar.name}`}
+                    >
+                        <img src={avatar.neutral} alt={avatar.name} className="w-full h-full object-cover bg-gray-800" />
+                    </button>
+                ))}
+            </div>
         </div>
       </header>
       
@@ -420,13 +542,21 @@ const App: React.FC = () => {
             <VocabularyCard word={vocabularyWord.word} definition={vocabularyWord.definition} />
         )}
         <div className="flex-grow flex flex-col md:flex-row gap-6">
-          <VideoPanel name="You" stream={userStream} isSessionActive={isSessionActive} />
+          <VideoPanel 
+            name="You" 
+            stream={userStream} 
+            isSessionActive={isSessionActive} 
+            isSpeaking={isUserSpeaking}
+            isProcessing={isSessionActive && !isUserSpeaking && !isAiSpeaking}
+            audioAnalyser={inputAnalyserRef.current}
+          />
           <VideoPanel 
             name={`AI Coach ${currentAvatar.name}`} 
             neutralAvatarUrl={currentAvatar.neutral}
             talkingAvatarUrl={currentAvatar.talking}
             isSessionActive={isSessionActive}
             isSpeaking={isAiSpeaking}
+            audioAnalyser={analyserRef.current}
             />
         </div>
         
@@ -457,4 +587,4 @@ const App: React.FC = () => {
   );
 };
 
-export default App;
+export default VoiceCoach;

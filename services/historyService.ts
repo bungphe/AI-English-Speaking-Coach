@@ -1,9 +1,9 @@
-
 import { SavedConversation } from '../types';
 
 const HISTORY_KEY = 'ai-english-coach-history';
 
 export const getHistory = (): SavedConversation[] => {
+  if (typeof window === 'undefined') return [];
   try {
     const saved = localStorage.getItem(HISTORY_KEY);
     if (saved) {
@@ -16,6 +16,7 @@ export const getHistory = (): SavedConversation[] => {
 };
 
 export const saveConversation = (conversation: SavedConversation) => {
+  if (typeof window === 'undefined') return;
   try {
     const history = getHistory();
     const updatedHistory = [conversation, ...history];
@@ -26,6 +27,7 @@ export const saveConversation = (conversation: SavedConversation) => {
 };
 
 export const deleteConversation = (id: string): SavedConversation[] => {
+    if (typeof window === 'undefined') return [];
     try {
         const history = getHistory();
         const updatedHistory = history.filter(conv => conv.id !== id);

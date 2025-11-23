@@ -1,3 +1,5 @@
+'use client';
+
 import React from 'react';
 import { SavedConversation } from '../types';
 import TranscriptDisplay from './TranscriptDisplay';
@@ -59,8 +61,8 @@ const HistoryPanel: React.FC<HistoryPanelProps> = ({ isOpen, onClose, conversati
                 <div className="p-6">
                     <h4 className="text-lg font-semibold mb-2 text-green-400">Feedback Summary</h4>
                     <div
-                        className="prose prose-invert prose-sm bg-gray-900/50 rounded-lg p-4"
-                        dangerouslySetInnerHTML={{ __html: selectedConversation.feedback.replace(/\n/g, '<br />') }}
+                        className="prose prose-invert prose-sm bg-gray-900/50 rounded-lg p-4 max-w-none"
+                        dangerouslySetInnerHTML={{ __html: selectedConversation.feedback }}
                     />
                 </div>
                 <div className="p-6 border-t border-gray-700">
