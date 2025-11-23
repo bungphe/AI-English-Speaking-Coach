@@ -43,6 +43,7 @@ const VoiceCoach: React.FC<VoiceCoachProps> = ({ apiKey }) => {
   const [isGeneratingFeedback, setIsGeneratingFeedback] = useState(false);
   const [practiceMode, setPracticeMode] = useState<'conversation' | 'vocabulary'>('conversation');
   const [vocabularyWord, setVocabularyWord] = useState<VocabularyWord | null>(null);
+  const [avatarGesture, setAvatarGesture] = useState<'nod' | 'shake' | null>(null);
 
   const sessionPromiseRef = useRef<Promise<any> | null>(null);
   const inputAudioContextRef = useRef<AudioContext | null>(null);
@@ -54,6 +55,7 @@ const VoiceCoach: React.FC<VoiceCoachProps> = ({ apiKey }) => {
   const nextStartTimeRef = useRef(0);
   const audioSources = useRef<Set<AudioBufferSourceNode>>(new Set());
   const sessionEndedRef = useRef(false);
+  const gestureTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Memoize the AI client to prevent recreation on every render
   const ai = useMemo(() => new GoogleGenAI({ apiKey }), [apiKey]);
@@ -102,6 +104,7 @@ const VoiceCoach: React.FC<VoiceCoachProps> = ({ apiKey }) => {
     audioSources.current.forEach(source => source.stop());
     audioSources.current.clear();
     nextStartTimeRef.current = 0;
+    setAvatarGesture(null);
 
   }, [userStream]);
 
@@ -227,6 +230,40 @@ const VoiceCoach: React.FC<VoiceCoachProps> = ({ apiKey }) => {
     }
   }, [ai.live, stopSession, currentAvatar.name, practiceMode]);
   
+  const detectSentimentGesture = (text: string) => {
+    // Only analyze the beginning of the chunk (first 50 chars) to catch immediate reactions
+    // and avoid false positives deep in a sentence.
+    const snippet = text.substring(0, 50).toLowerCase();
+    
+    // Regex for whole-word matching to be more accurate
+    // Positive / Agreement / Praise triggers
+    const nodRegex = /\b(yes|yeah|yep|correct|exactly|right|good|great|awesome|perfect|definitely|sure|i agree|well done)\b/i;
+    
+    // Negative / Disagreement / Correction triggers
+    const shakeRegex = /\b(no|nope|nah|not quite|actually|however|incorrect|wrong|try again|unfortunately|but)\b/i;
+
+    const hasNod = nodRegex.test(snippet);
+    const hasShake = shakeRegex.test(snippet);
+
+    if (hasNod && !hasShake) {
+        setAvatarGesture('nod');
+        resetGestureTimer();
+    } else if (hasShake && !hasNod) {
+        setAvatarGesture('shake');
+        resetGestureTimer();
+    }
+  };
+
+  const resetGestureTimer = () => {
+    if (gestureTimeoutRef.current) {
+        clearTimeout(gestureTimeoutRef.current);
+    }
+    // Reduced duration to 1.5s for more subtle, short-lived gestures
+    gestureTimeoutRef.current = setTimeout(() => {
+        setAvatarGesture(null);
+    }, 1500);
+  };
+
   const handleTranscription = (message: LiveServerMessage) => {
     setTranscript(prev => {
         let newTranscript = [...prev];
@@ -242,6 +279,10 @@ const VoiceCoach: React.FC<VoiceCoachProps> = ({ apiKey }) => {
             }
         } else if (message.serverContent?.outputTranscription) {
             const text = message.serverContent.outputTranscription.text;
+            
+            // Analyze text for gestures using nuanced regex logic
+            detectSentimentGesture(text);
+
             const lastEntry = newTranscript[newTranscript.length - 1];
 
             let combinedText;
@@ -557,6 +598,7 @@ const VoiceCoach: React.FC<VoiceCoachProps> = ({ apiKey }) => {
             isSessionActive={isSessionActive}
             isSpeaking={isAiSpeaking}
             audioAnalyser={analyserRef.current}
+            gesture={avatarGesture}
             />
         </div>
         
